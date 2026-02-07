@@ -1,0 +1,5 @@
+{
+  "name": "Foco Absoluto",
+  "description": "A gamified personal goal-setting web app focused on combating procrastination through real consequences and a credit system called 'Disciplina'. Users must check-in daily on their goals or risk losing Disciplina points, which can block their progress until more are purchased.",
+  "requestFramePermissions": []
+}
