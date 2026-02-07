@@ -1,21 +1,23 @@
 
-import React, { createContext, useContext, useState, ReactNode, useCallback, useMemo } from 'react';
+import React, { createContext, useContext, useState, ReactNode, useCallback, useMemo, useEffect } from 'react';
 import { User, Plan, Goal, GoalCategory, Notification, GoalType } from '../types';
 import { INITIAL_DISCIPLINA, DISCIPLINA_PENALTY, CHECKIN_WINDOW_HOURS } from '../constants';
+import { supabase } from '../lib/supabase';
 
 interface RegisterData {
     email: string;
     name: string;
     phone: string;
-    password: string;
+    password?: string;
 }
 
 interface UserContextType {
     user: User | null;
+    loading: boolean;
     notifications: Notification[];
     isBlocked: boolean;
-    login: (email: string) => void;
-    register: (data: RegisterData) => void;
+    login: (email: string, password?: string) => Promise<void>;
+    register: (data: RegisterData) => Promise<void>;
     completeTutorial: () => void;
     selectPlan: (plan: Plan) => void;
     logout: () => void;
@@ -31,13 +33,9 @@ interface UserContextType {
 
 const UserContext = createContext<UserContextType | undefined>(undefined);
 
-const FAKE_USER_KEY = 'foco_absoluto_user';
-
 export const UserProvider: React.FC<{ children: ReactNode }> = ({ children }) => {
-    const [user, setUser] = useState<User | null>(() => {
-        const savedUser = localStorage.getItem(FAKE_USER_KEY);
-        return savedUser ? JSON.parse(savedUser) : null;
-    });
+    const [user, setUser] = useState<User | null>(null);
+    const [loading, setLoading] = useState(true);
     const [notifications, setNotifications] = useState<Notification[]>([]);
 
     const addNotification = useCallback((message: string, type: 'success' | 'warning' | 'error') => {
@@ -47,35 +45,126 @@ export const UserProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
         }, 5000);
     }, []);
 
+    // Fetch user profile from Supabase
+    const fetchProfile = async (userId: string, email: string) => {
+        try {
+            const { data, error } = await supabase
+                .from('profiles')
+                .select('*')
+                .eq('id', userId)
+                .single();
+
+            if (error && error.code !== 'PGRST116') throw error;
+
+            if (data) {
+                setUser({
+                    email: email,
+                    name: data.name,
+                    phone: data.phone,
+                    plan: data.plan as Plan,
+                    disciplina: data.disciplina,
+                    goals: data.goals || [],
+                    hasCompletedTutorial: data.has_completed_tutorial,
+                    hasSelectedPlan: data.has_selected_plan,
+                    lastGlobalCheckIn: data.last_global_check_in,
+                });
+            } else {
+                // Profile doesn't exist yet (first time login/register)
+                return null;
+            }
+        } catch (err) {
+            console.error("Error fetching profile:", err);
+            addNotification('Erro ao carregar perfil.', 'error');
+        } finally {
+            setLoading(false);
+        }
+    };
+
+    useEffect(() => {
+        // Handle auth state changes
+        const { data: { subscription } } = supabase.auth.onAuthStateChange(async (event, session) => {
+            if (session?.user) {
+                await fetchProfile(session.user.id, session.user.email!);
+            } else {
+                setUser(null);
+                setLoading(false);
+            }
+        });
+
+        return () => subscription.unsubscribe();
+    }, []);
+
+    const saveProfile = async (updatedUser: User) => {
+        const { data: { user: authUser } } = await supabase.auth.getUser();
+        if (!authUser) return;
+
+        const profileData = {
+            id: authUser.id,
+            name: updatedUser.name,
+            phone: updatedUser.phone,
+            plan: updatedUser.plan,
+            disciplina: updatedUser.disciplina,
+            goals: updatedUser.goals,
+            has_completed_tutorial: updatedUser.hasCompletedTutorial,
+            has_selected_plan: updatedUser.hasSelectedPlan,
+            last_global_check_in: updatedUser.lastGlobalCheckIn,
+            updated_at: new Date().toISOString(),
+        };
+
+        const { error } = await supabase.from('profiles').upsert(profileData);
+        if (error) {
+            console.error("Error saving profile:", error);
+            addNotification('Erro ao sincronizar dados.', 'error');
+        }
+    };
+
     const updateUser = (updatedUser: User) => {
         setUser(updatedUser);
-        localStorage.setItem(FAKE_USER_KEY, JSON.stringify(updatedUser));
+        saveProfile(updatedUser);
     };
 
-    const login = (email: string) => {
-        const saved = localStorage.getItem(FAKE_USER_KEY);
-        if (saved) {
-            const parsed = JSON.parse(saved);
-            if (parsed.email === email) {
-                updateUser(parsed);
-                return;
-            }
+    const login = async (email: string, password?: string) => {
+        if (!password) {
+             addNotification('Senha é obrigatória para este protocolo.', 'error');
+             return;
         }
-        addNotification('Usuário não encontrado. Crie uma conta.', 'error');
+        setLoading(true);
+        const { error } = await supabase.auth.signInWithPassword({ email, password });
+        if (error) {
+            addNotification('Falha na autenticação: ' + error.message, 'error');
+            setLoading(false);
+        }
     };
 
-    const register = (data: RegisterData) => {
-        const newUser: User = {
-            ...data,
-            plan: Plan.Gratuito,
-            disciplina: INITIAL_DISCIPLINA,
-            goals: [],
-            hasCompletedTutorial: false,
-            hasSelectedPlan: false,
-            lastGlobalCheckIn: null,
-        };
-        updateUser(newUser);
-        addNotification('Bem-vindo ao Protocolo de Foco!', 'success');
+    const register = async (data: RegisterData) => {
+        setLoading(true);
+        const { data: authData, error } = await supabase.auth.signUp({
+            email: data.email,
+            password: data.password!,
+        });
+
+        if (error) {
+            addNotification('Erro no cadastro: ' + error.message, 'error');
+            setLoading(false);
+            return;
+        }
+
+        if (authData.user) {
+            const newUser: User = {
+                email: data.email,
+                name: data.name,
+                phone: data.phone,
+                plan: Plan.Gratuito,
+                disciplina: INITIAL_DISCIPLINA,
+                goals: [],
+                hasCompletedTutorial: false,
+                hasSelectedPlan: false,
+                lastGlobalCheckIn: null,
+            };
+            setUser(newUser);
+            await saveProfile(newUser);
+            addNotification('Bem-vindo ao Protocolo de Foco!', 'success');
+        }
     };
 
     const completeTutorial = () => {
@@ -89,8 +178,8 @@ export const UserProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
         addNotification(`Protocolo ${plan} ativado com sucesso!`, 'success');
     };
 
-    const logout = () => {
-        localStorage.removeItem(FAKE_USER_KEY);
+    const logout = async () => {
+        await supabase.auth.signOut();
         setUser(null);
     };
 
@@ -140,7 +229,7 @@ export const UserProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
         updateUser({ 
             ...user, 
             lastGlobalCheckIn: now.toISOString(),
-            disciplina: user.disciplina + 2 // Bonus for daily presence
+            disciplina: user.disciplina + 2
         });
         addNotification('Presença Confirmada! +2 Disciplina', 'success');
     };
@@ -151,7 +240,6 @@ export const UserProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
         const updatedGoals = user.goals.map(goal => {
             if (goal.id === goalId && goal.type === GoalType.Money) {
                 const newCurrentAmount = (goal.currentAmount || 0) + amount;
-                
                 const lastValidCheckin = goal.lastCheckIn ? new Date(goal.lastCheckIn) : new Date(goal.createdAt);
                 const hoursSinceLast = (now.getTime() - lastValidCheckin.getTime()) / (1000 * 60 * 60);
 
@@ -222,6 +310,7 @@ export const UserProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
 
     const value = {
         user,
+        loading,
         notifications,
         isBlocked,
         login,

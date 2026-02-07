@@ -12,7 +12,7 @@ const Login: React.FC = () => {
     const [isRegistering, setIsRegistering] = useState(false);
     const [error, setError] = useState('');
     
-    const { login, register } = useUser();
+    const { login, register, loading } = useUser();
 
     const validateEmail = (email: string) => {
         return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email);
@@ -25,7 +25,7 @@ const Login: React.FC = () => {
         }
     };
 
-    const handleSubmit = (e: React.FormEvent) => {
+    const handleSubmit = async (e: React.FormEvent) => {
         e.preventDefault();
         setError('');
 
@@ -51,9 +51,13 @@ const Login: React.FC = () => {
                 setError('As senhas não coincidem!');
                 return;
             }
-            register({ email, name, phone, password });
+            await register({ email, name, phone, password });
         } else {
-            login(email);
+            if (!password) {
+                setError('A senha é necessária.');
+                return;
+            }
+            await login(email, password);
         }
     };
 
@@ -135,49 +139,38 @@ const Login: React.FC = () => {
                             />
                         </div>
 
-                        {isRegistering && (
-                            <div className="grid grid-cols-2 gap-4">
-                                <div className="space-y-1">
-                                    <label className="text-[9px] font-black text-zinc-600 uppercase tracking-widest block ml-1">Senha</label>
-                                    <input
-                                        type="password"
-                                        value={password}
-                                        onChange={(e) => setPassword(e.target.value)}
-                                        placeholder="••••••"
-                                        className="w-full bg-black text-white px-5 py-3 rounded-xl border border-zinc-800 focus:border-emerald-500 outline-none transition-all font-bold text-sm"
-                                        required
-                                    />
-                                </div>
-                                <div className="space-y-1">
-                                    <label className="text-[9px] font-black text-zinc-600 uppercase tracking-widest block ml-1">Confirmar</label>
-                                    <input
-                                        type="password"
-                                        value={confirmPassword}
-                                        onChange={(e) => setConfirmPassword(e.target.value)}
-                                        placeholder="••••••"
-                                        className="w-full bg-black text-white px-5 py-3 rounded-xl border border-zinc-800 focus:border-emerald-500 outline-none transition-all font-bold text-sm"
-                                        required
-                                    />
-                                </div>
-                            </div>
-                        )}
+                        <div className="space-y-1">
+                            <label className="text-[9px] font-black text-zinc-600 uppercase tracking-widest block ml-1">Senha</label>
+                            <input
+                                type="password"
+                                value={password}
+                                onChange={(e) => setPassword(e.target.value)}
+                                placeholder="••••••"
+                                className="w-full bg-black text-white px-5 py-3 rounded-xl border border-zinc-800 focus:border-emerald-500 outline-none transition-all font-bold text-sm"
+                                required
+                            />
+                        </div>
 
-                        {!isRegistering && (
+                        {isRegistering && (
                             <div className="space-y-1">
-                                <label className="text-[9px] font-black text-zinc-600 uppercase tracking-widest block ml-1">Senha</label>
+                                <label className="text-[9px] font-black text-zinc-600 uppercase tracking-widest block ml-1">Confirmar Senha</label>
                                 <input
                                     type="password"
+                                    value={confirmPassword}
+                                    onChange={(e) => setConfirmPassword(e.target.value)}
                                     placeholder="••••••"
                                     className="w-full bg-black text-white px-5 py-3 rounded-xl border border-zinc-800 focus:border-emerald-500 outline-none transition-all font-bold text-sm"
+                                    required
                                 />
                             </div>
                         )}
 
                         <button
                             type="submit"
-                            className="w-full bg-emerald-500 hover:bg-emerald-400 text-black font-black py-4 px-4 rounded-xl mt-4 transition-all transform active:scale-95 shadow-xl shadow-emerald-500/10 text-[10px] uppercase tracking-widest"
+                            disabled={loading}
+                            className="w-full bg-emerald-500 hover:bg-emerald-400 text-black font-black py-4 px-4 rounded-xl mt-4 transition-all transform active:scale-95 shadow-xl shadow-emerald-500/10 text-[10px] uppercase tracking-widest disabled:opacity-50 disabled:cursor-wait"
                         >
-                            {isRegistering ? 'Iniciar Recrutamento' : 'Acessar Painel'}
+                            {loading ? 'Processando...' : (isRegistering ? 'Iniciar Recrutamento' : 'Acessar Painel')}
                         </button>
                     </form>
                 </div>

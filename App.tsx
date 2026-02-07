@@ -11,7 +11,7 @@ import Settings from './components/Settings';
 type View = 'dashboard' | 'settings';
 
 const AppContent: React.FC = () => {
-    const { user, isBlocked, checkOverdueGoals } = useUser();
+    const { user, loading, isBlocked, checkOverdueGoals } = useUser();
     const [isStoreOpen, setStoreOpen] = useState(false);
     const [view, setView] = useState<View>('dashboard');
 
@@ -22,6 +22,15 @@ const AppContent: React.FC = () => {
 
         return () => clearInterval(interval);
     }, [checkOverdueGoals]);
+
+    if (loading) {
+        return (
+            <div className="min-h-screen bg-zinc-950 flex flex-col items-center justify-center">
+                <div className="w-16 h-16 border-4 border-emerald-500/20 border-t-emerald-500 rounded-full animate-spin"></div>
+                <p className="mt-6 text-[10px] font-black text-emerald-500 uppercase tracking-[0.4em] animate-pulse">Sincronizando Protocolo...</p>
+            </div>
+        );
+    }
 
     if (!user) {
         return <Login />;
@@ -35,7 +44,7 @@ const AppContent: React.FC = () => {
                 
                 <div className={isBlocked ? 'blur-md pointer-events-none' : ''}>
                     {view === 'dashboard' && <Dashboard />}
-                    {view === 'settings' && <Settings />}
+                    {view === 'settings' && <Settings onBack={() => setView('dashboard')} />}
                 </div>
 
                 <StoreModal isOpen={isStoreOpen} onClose={() => setStoreOpen(false)} />

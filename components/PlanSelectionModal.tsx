@@ -14,65 +14,69 @@ const PlanSelectionModal: React.FC = () => {
             id: Plan.Gratuito,
             name: "Operacional Básico",
             price: "R$ 0,00",
+            status: "ATIVO",
             features: ["1 Meta Ativa", "Check-in Diário", "Sistema de Disciplina"],
-            cta: "Manter Básico",
-            style: "border-zinc-800 bg-zinc-900/50"
+            cta: "Iniciar Protocolo",
+            style: "border-zinc-800 bg-zinc-900/50 hover:border-emerald-500/30",
+            disabled: false
         },
         {
             id: Plan.PRO,
             name: "Protocolo de Elite",
             price: "R$ 27,90",
             period: "/mês",
+            status: "EM REVISÃO",
             features: [
                 "Até 5 Metas Ativas", 
                 "Dashboard Detalhado", 
                 "Histórico de Evolução", 
-                "Bônus de Streak PRO",
-                "Temas Exclusivos"
+                "Módulo Multi-Alvo"
             ],
-            cta: "Upgrade para Elite",
-            style: "border-emerald-500 bg-emerald-500/5 shadow-[0_0_30px_rgba(16,185,129,0.1)]",
-            premium: true
+            cta: "Inativo Temporariamente",
+            style: "border-zinc-800 bg-zinc-900/20 opacity-50 grayscale",
+            disabled: true
         }
     ];
 
     return (
-        <div className="fixed inset-0 bg-black/95 backdrop-blur-3xl z-[80] flex items-center justify-center p-4">
-            <div className="max-w-4xl w-full">
-                <div className="text-center mb-12">
-                    <span className="text-emerald-500 font-black text-[10px] uppercase tracking-[0.4em] mb-4 block">Fase Final de Configuração</span>
-                    <h2 className="text-4xl sm:text-6xl font-black text-white uppercase tracking-tighter italic">Escolha seu <span className="text-emerald-500">Nível</span></h2>
+        <div className="fixed inset-0 bg-black/98 backdrop-blur-3xl z-[80] flex items-center justify-center p-4">
+            <div className="max-w-3xl w-full">
+                <div className="text-center mb-10">
+                    <span className="text-emerald-500 font-black text-[9px] uppercase tracking-[0.5em] mb-4 block animate-pulse">Configuração de Protocolo Final</span>
+                    <h2 className="text-4xl sm:text-5xl font-black text-white uppercase tracking-tighter italic leading-none">Selecione seu <span className="text-emerald-500">Nível</span></h2>
                 </div>
 
-                <div className="grid grid-cols-1 md:grid-cols-2 gap-8">
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-6 max-w-2xl mx-auto">
                     {plans.map((p) => (
-                        <div key={p.id} className={`p-8 sm:p-12 rounded-[3rem] border-2 flex flex-col transition-all hover:scale-[1.02] duration-500 ${p.style}`}>
-                            {p.premium && (
-                                <div className="flex justify-start mb-6">
-                                    <span className="bg-emerald-500 text-black text-[9px] font-black uppercase tracking-widest px-4 py-1 rounded-full">Recomendado</span>
-                                </div>
-                            )}
-                            <h3 className="text-3xl font-black text-white uppercase tracking-tighter mb-2">{p.name}</h3>
-                            <div className="mb-8">
-                                <span className="text-4xl font-black text-white">{p.price}</span>
-                                {p.period && <span className="text-zinc-600 text-sm font-bold ml-1">{p.period}</span>}
+                        <div key={p.id} className={`p-8 rounded-[2.5rem] border-2 flex flex-col transition-all duration-500 relative overflow-hidden ${p.style}`}>
+                            <div className="flex justify-between items-start mb-6">
+                                <h3 className="text-xl font-black text-white uppercase tracking-tighter leading-tight">{p.name}</h3>
+                                <span className={`text-[7px] font-black px-2 py-0.5 rounded border ${p.disabled ? 'text-red-500 border-red-500/20 bg-red-500/5' : 'text-emerald-500 border-emerald-500/20 bg-emerald-500/5'}`}>
+                                    {p.status}
+                                </span>
                             </div>
 
-                            <ul className="space-y-4 mb-12 flex-grow">
+                            <div className="mb-8">
+                                <span className="text-3xl font-black text-white tracking-tighter">{p.price}</span>
+                                {p.period && <span className="text-zinc-600 text-[10px] font-bold ml-1 uppercase">{p.period}</span>}
+                            </div>
+
+                            <ul className="space-y-4 mb-10 flex-grow">
                                 {p.features.map(f => (
-                                    <li key={f} className="flex items-center text-sm font-bold text-zinc-400">
-                                        <CheckIcon className="w-5 h-5 text-emerald-500 mr-3" />
+                                    <li key={f} className={`flex items-center text-[11px] font-bold ${p.disabled ? 'text-zinc-600' : 'text-zinc-400'}`}>
+                                        <CheckIcon className={`w-4 h-4 mr-3 ${p.disabled ? 'text-zinc-700' : 'text-emerald-500'}`} />
                                         {f}
                                     </li>
                                 ))}
                             </ul>
 
                             <button
-                                onClick={() => selectPlan(p.id)}
-                                className={`w-full py-5 rounded-2xl font-black uppercase tracking-widest text-xs transition-all transform active:scale-95 ${
-                                    p.premium 
-                                    ? 'bg-emerald-600 text-white shadow-xl shadow-emerald-500/20 hover:bg-emerald-500' 
-                                    : 'bg-zinc-800 text-zinc-400 hover:bg-zinc-700'
+                                onClick={() => !p.disabled && selectPlan(p.id)}
+                                disabled={p.disabled}
+                                className={`w-full py-4 rounded-xl font-black uppercase tracking-widest text-[10px] transition-all transform active:scale-95 ${
+                                    p.disabled 
+                                    ? 'bg-zinc-950 text-zinc-700 border border-zinc-800 cursor-not-allowed italic' 
+                                    : 'bg-emerald-600 text-white shadow-lg shadow-emerald-500/10 hover:bg-emerald-500'
                                 }`}
                             >
                                 {p.cta}
@@ -80,6 +84,10 @@ const PlanSelectionModal: React.FC = () => {
                         </div>
                     ))}
                 </div>
+                
+                <p className="text-center mt-10 text-[9px] font-black text-zinc-700 uppercase tracking-widest">
+                    Segurança de Dados • Protocolo AES-256
+                </p>
             </div>
         </div>
     );
