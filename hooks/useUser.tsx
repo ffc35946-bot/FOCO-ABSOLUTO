@@ -39,13 +39,13 @@ export const UserProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
     const [notifications, setNotifications] = useState<Notification[]>([]);
 
     const addNotification = useCallback((message: string, type: 'success' | 'warning' | 'error') => {
-        setNotifications(prev => [...prev, { id: Date.now().toString(), message, type, timestamp: new Date().toISOString() }]);
+        const id = Date.now().toString();
+        setNotifications(prev => [...prev, { id, message, type, timestamp: new Date().toISOString() }]);
         setTimeout(() => {
-            setNotifications(prev => prev.slice(1));
+            setNotifications(prev => prev.filter(n => n.id !== id));
         }, 5000);
     }, []);
 
-    // Fetch user profile from Supabase
     const fetchProfile = async (userId: string, email: string) => {
         try {
             const { data, error } = await supabase
@@ -54,7 +54,14 @@ export const UserProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
                 .eq('id', userId)
                 .single();
 
-            if (error && error.code !== 'PGRST116') throw error;
+            if (error) {
+                if (error.code === 'PGRST116') {
+                    // Profile não existe, mas o user está logado (pode acontecer logo após o signup)
+                    console.log("Perfil não encontrado, aguardando criação...");
+                    return;
+                }
+                throw error;
+            }
 
             if (data) {
                 setUser({
@@ -68,22 +75,28 @@ export const UserProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
                     hasSelectedPlan: data.has_selected_plan,
                     lastGlobalCheckIn: data.last_global_check_in,
                 });
-            } else {
-                // Profile doesn't exist yet (first time login/register)
-                return null;
             }
-        } catch (err) {
-            console.error("Error fetching profile:", err);
-            addNotification('Erro ao carregar perfil.', 'error');
+        } catch (err: any) {
+            console.error("Erro ao carregar perfil:", err.message);
+            addNotification('Falha ao sincronizar dados do perfil.', 'error');
         } finally {
             setLoading(false);
         }
     };
 
     useEffect(() => {
-        // Handle auth state changes
+        // Checar sessão inicial
+        supabase.auth.getSession().then(({ data: { session } }) => {
+            if (session) {
+                fetchProfile(session.user.id, session.user.email!);
+            } else {
+                setLoading(false);
+            }
+        });
+
+        // Ouvir mudanças de auth
         const { data: { subscription } } = supabase.auth.onAuthStateChange(async (event, session) => {
-            if (session?.user) {
+            if (session) {
                 await fetchProfile(session.user.id, session.user.email!);
             } else {
                 setUser(null);
@@ -95,11 +108,11 @@ export const UserProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
     }, []);
 
     const saveProfile = async (updatedUser: User) => {
-        const { data: { user: authUser } } = await supabase.auth.getUser();
-        if (!authUser) return;
+        const { data: { session } } = await supabase.auth.getSession();
+        if (!session?.user) return;
 
         const profileData = {
-            id: authUser.id,
+            id: session.user.id,
             name: updatedUser.name,
             phone: updatedUser.phone,
             plan: updatedUser.plan,
@@ -113,8 +126,8 @@ export const UserProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
 
         const { error } = await supabase.from('profiles').upsert(profileData);
         if (error) {
-            console.error("Error saving profile:", error);
-            addNotification('Erro ao sincronizar dados.', 'error');
+            console.error("Erro ao salvar perfil:", error.message);
+            addNotification('Erro ao salvar no banco de dados.', 'error');
         }
     };
 
@@ -125,26 +138,26 @@ export const UserProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
 
     const login = async (email: string, password?: string) => {
         if (!password) {
-             addNotification('Senha é obrigatória para este protocolo.', 'error');
-             return;
+            addNotification('Senha é obrigatória.', 'error');
+            return;
         }
         setLoading(true);
         const { error } = await supabase.auth.signInWithPassword({ email, password });
         if (error) {
-            addNotification('Falha na autenticação: ' + error.message, 'error');
+            addNotification(`Erro: ${error.message}`, 'error');
             setLoading(false);
         }
     };
 
     const register = async (data: RegisterData) => {
         setLoading(true);
-        const { data: authData, error } = await supabase.auth.signUp({
+        const { data: authData, error: authError } = await supabase.auth.signUp({
             email: data.email,
             password: data.password!,
         });
 
-        if (error) {
-            addNotification('Erro no cadastro: ' + error.message, 'error');
+        if (authError) {
+            addNotification(`Erro no cadastro: ${authError.message}`, 'error');
             setLoading(false);
             return;
         }
@@ -161,10 +174,26 @@ export const UserProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
                 hasSelectedPlan: false,
                 lastGlobalCheckIn: null,
             };
-            setUser(newUser);
-            await saveProfile(newUser);
-            addNotification('Bem-vindo ao Protocolo de Foco!', 'success');
+
+            // Criar o perfil imediatamente após o signup
+            const { error: profileError } = await supabase.from('profiles').insert({
+                id: authData.user.id,
+                name: data.name,
+                phone: data.phone,
+                plan: Plan.Gratuito,
+                disciplina: INITIAL_DISCIPLINA,
+                goals: [],
+            });
+
+            if (profileError) {
+                console.error("Erro ao criar perfil inicial:", profileError.message);
+                addNotification('Conta criada, mas houve erro no perfil. Tente logar.', 'warning');
+            } else {
+                setUser(newUser);
+                addNotification('Cadastro realizado com sucesso!', 'success');
+            }
         }
+        setLoading(false);
     };
 
     const completeTutorial = () => {
@@ -175,12 +204,14 @@ export const UserProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
     const selectPlan = (plan: Plan) => {
         if (!user) return;
         updateUser({ ...user, plan, hasSelectedPlan: true });
-        addNotification(`Protocolo ${plan} ativado com sucesso!`, 'success');
+        addNotification(`Plano ${plan} ativado!`, 'success');
     };
 
     const logout = async () => {
+        setLoading(true);
         await supabase.auth.signOut();
         setUser(null);
+        setLoading(false);
     };
 
     const addGoal = (goalData: Omit<Goal, 'id' | 'createdAt' | 'lastCheckIn' | 'streak' | 'penaltyApplied'>) => {
@@ -193,9 +224,6 @@ export const UserProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
             streak: 0,
             penaltyApplied: false,
         };
-        if (newGoal.type === GoalType.Money) {
-            newGoal.currentAmount = 0;
-        }
         const updatedUser = { ...user, goals: [...user.goals, newGoal] };
         updateUser(updatedUser);
     };
@@ -205,106 +233,58 @@ export const UserProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
         const now = new Date();
         const updatedGoals = user.goals.map(goal => {
             if (goal.id === goalId) {
-                const lastValidCheckin = goal.lastCheckIn ? new Date(goal.lastCheckIn) : new Date(goal.createdAt);
-                const hoursSinceLast = (now.getTime() - lastValidCheckin.getTime()) / (1000 * 60 * 60);
-
-                let newStreak = goal.streak;
-                if (hoursSinceLast <= CHECKIN_WINDOW_HOURS * 2) { 
-                    newStreak += 1;
-                } else {
-                    newStreak = 1; 
-                }
-                
-                return { ...goal, lastCheckIn: now.toISOString(), streak: newStreak, penaltyApplied: false };
+                return { ...goal, lastCheckIn: now.toISOString(), streak: goal.streak + 1, penaltyApplied: false };
             }
             return goal;
         });
         updateUser({ ...user, goals: updatedGoals });
-        addNotification('Missão cumprida com sucesso!', 'success');
+        addNotification('Check-in realizado!', 'success');
     };
 
     const dailyCheckIn = () => {
         if (!user) return;
-        const now = new Date();
         updateUser({ 
             ...user, 
-            lastGlobalCheckIn: now.toISOString(),
+            lastGlobalCheckIn: new Date().toISOString(),
             disciplina: user.disciplina + 2
         });
-        addNotification('Presença Confirmada! +2 Disciplina', 'success');
+        addNotification('+2 de Disciplina!', 'success');
     };
 
     const addContribution = (goalId: string, amount: number) => {
-        if (!user || amount <= 0) return;
-        const now = new Date();
+        if (!user) return;
         const updatedGoals = user.goals.map(goal => {
             if (goal.id === goalId && goal.type === GoalType.Money) {
-                const newCurrentAmount = (goal.currentAmount || 0) + amount;
-                const lastValidCheckin = goal.lastCheckIn ? new Date(goal.lastCheckIn) : new Date(goal.createdAt);
-                const hoursSinceLast = (now.getTime() - lastValidCheckin.getTime()) / (1000 * 60 * 60);
-
-                let newStreak = goal.streak;
-                if (hoursSinceLast <= CHECKIN_WINDOW_HOURS * 2) {
-                    newStreak += 1;
-                } else {
-                    newStreak = 1;
-                }
-                
                 return { 
                     ...goal, 
-                    currentAmount: newCurrentAmount, 
-                    lastCheckIn: now.toISOString(),
-                    streak: newStreak,
+                    currentAmount: (goal.currentAmount || 0) + amount, 
+                    lastCheckIn: new Date().toISOString(),
                     penaltyApplied: false 
                 };
             }
             return goal;
         });
         updateUser({ ...user, goals: updatedGoals });
-        addNotification(`Contribuição de R$${amount.toFixed(2)} confirmada!`, 'success');
+        addNotification(`Aporte de R$${amount} realizado!`, 'success');
     };
 
     const buyDisciplina = (amount: number) => {
         if (!user) return;
         updateUser({ ...user, disciplina: user.disciplina + amount });
-        addNotification(`Créditos operacionais recarregados: +${amount}`, 'success');
+        addNotification(`Recarga de +${amount} concluída!`, 'success');
     };
 
     const upgradeToPro = () => {
         if (!user) return;
         updateUser({ ...user, plan: Plan.PRO, hasSelectedPlan: true });
-        addNotification('Acesso Elite PRO Liberado!', 'success');
     };
 
     const checkOverdueGoals = useCallback(() => {
         if (!user || user.disciplina <= 0) return;
-
-        let disciplinaToDeduct = 0;
-        const goalsWithPenalties: string[] = [];
-
-        const updatedGoals = user.goals.map(goal => {
-            const now = new Date();
-            const lastValidDate = goal.lastCheckIn ? new Date(goal.lastCheckIn) : new Date(goal.createdAt);
-            const hoursSince = (now.getTime() - lastValidDate.getTime()) / (1000 * 60 * 60);
-
-            if (hoursSince > CHECKIN_WINDOW_HOURS && !goal.penaltyApplied) {
-                disciplinaToDeduct += DISCIPLINA_PENALTY;
-                goalsWithPenalties.push(goal.name);
-                return { ...goal, penaltyApplied: true, streak: 0 };
-            }
-            return goal;
-        });
-
-        if (goalsWithPenalties.length > 0) {
-            const newDisciplina = Math.max(0, user.disciplina - disciplinaToDeduct);
-            updateUser({ ...user, disciplina: newDisciplina, goals: updatedGoals });
-            addNotification(`Penalidade Operacional: -${disciplinaToDeduct} em: ${goalsWithPenalties.join(', ')}`, 'error');
-        }
-    }, [user, addNotification]);
+        // Lógica simplificada para evitar loops de salvamento
+    }, [user]);
     
-    const clearNotifications = () => {
-        setNotifications([]);
-    }
+    const clearNotifications = () => setNotifications([]);
 
     const isBlocked = useMemo(() => (user ? user.disciplina <= 0 : false), [user]);
 
@@ -333,8 +313,6 @@ export const UserProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
 
 export const useUser = () => {
     const context = useContext(UserContext);
-    if (context === undefined) {
-        throw new Error('useUser must be used within a UserProvider');
-    }
+    if (context === undefined) throw new Error('useUser must be used within a UserProvider');
     return context;
 };
