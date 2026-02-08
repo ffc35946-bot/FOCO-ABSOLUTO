@@ -30,8 +30,8 @@ const getEnv = (key: string): string => {
   return '';
 };
 
-const supabaseUrl = getEnv('VITE_SUPABASE_URL');
-const supabaseAnonKey = getEnv('VITE_SUPABASE_ANON_KEY');
+const supabaseUrl = getEnv('https://ddtkhnizsnvnopqcyjqb.supabase.co');
+const supabaseAnonKey = getEnv('sb_publishable_2PdyRH1lrQ4SpuoWcWDU8Q_G1O6geh9');
 
 /**
  * The Supabase SDK throws "supabaseUrl is required" if initialized with an empty string.
